@@ -3,7 +3,7 @@
  * Plugin Name:       Notion Sync for WP
  * Description:       Sync Notion databases and pages to WordPress posts/pages.
  * Version:           1.0.0
- * Author:            Antigravity
+ * Author:            Shubham Gate
  * Text Domain:       notion-sync-for-wp
  * License:           GPLv2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
