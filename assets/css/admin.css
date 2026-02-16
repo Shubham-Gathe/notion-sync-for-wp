@@ -1,0 +1,40 @@
+.notion-sync-for-wp-wrap {
+    max-width: 800px;
+    margin-top: 20px;
+    background: #fff;
+    padding: 20px 30px;
+    border-radius: 8px;
+    box-shadow: 0 2px 15px rgba(0, 0, 0, 0.05);
+}
+
+.notion-sync-for-wp-wrap h1 {
+    margin-bottom: 30px;
+    font-weight: 600;
+}
+
+.notion-sync-for-wp-actions {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #f0f0f1;
+}
+
+.notion-sync-for-wp-wrap .form-table th {
+    width: 200px;
+}
+
+#notion-sync-for-wp-test-result {
+    margin-top: 20px;
+}
+
+#notion-sync-for-wp-test-result.notice {
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.notion-sync-for-wp-wrap .spinner {
+    float: none;
+    margin: 0;
+}
