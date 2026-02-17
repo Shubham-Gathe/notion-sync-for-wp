@@ -21,12 +21,14 @@ class BlockParser {
 	private function __construct() {}
 
 	/**
-	 * Parse an array of Notion blocks into HTML
+	 * Parse an array of Notion blocks into HTML or Gutenberg Blocks
 	 *
 	 * @param array $blocks
-	 * @return string HTML content
+	 * @param int $post_id
+	 * @param string $mode 'classic' or 'gutenberg'
+	 * @return string Content
 	 */
-	public function parse_blocks( $blocks, $post_id = 0 ) {
+	public function parse_blocks( $blocks, $post_id = 0, $mode = 'classic' ) {
 		if ( empty( $blocks ) || ! is_array( $blocks ) ) {
 			return '';
 		}
@@ -49,23 +51,33 @@ class BlockParser {
 				}
 
 				$list_type     = $current_list_type;
-				$list_buffer[] = $this->parse_block( $block, $post_id );
+				$list_buffer[] = $this->parse_block( $block, $post_id, $mode );
 				continue;
 			}
 
 			// If we were in a list and now encounter a non-list item, flush buffer
 			if ( $list_type ) {
-				$html .= "<{$list_type}>\n" . implode( '', $list_buffer ) . "</{$list_type}>\n";
+				$list_html = "<{$list_type}>\n" . implode( '', $list_buffer ) . "</{$list_type}>\n";
+				if ( 'gutenberg' === $mode ) {
+					$html .= "<!-- wp:list -->\n" . $list_html . "<!-- /wp:list -->\n";
+				} else {
+					$html .= $list_html;
+				}
 				$list_buffer = [];
 				$list_type   = '';
 			}
 
-			$html .= $this->parse_block( $block, $post_id ) . "\n";
+			$html .= $this->parse_block( $block, $post_id, $mode ) . "\n";
 		}
 
 		// Final buffer flush
 		if ( $list_type ) {
-			$html .= "<{$list_type}>\n" . implode( '', $list_buffer ) . "</{$list_type}>\n";
+			$list_html = "<{$list_type}>\n" . implode( '', $list_buffer ) . "</{$list_type}>\n";
+			if ( 'gutenberg' === $mode ) {
+				$html .= "<!-- wp:list -->\n" . $list_html . "<!-- /wp:list -->\n";
+			} else {
+				$html .= $list_html;
+			}
 		}
 
 		return $html;
@@ -74,7 +86,7 @@ class BlockParser {
 	/**
 	 * Parse a single block
 	 */
-	private function parse_block( $block, $post_id = 0 ) {
+	private function parse_block( $block, $post_id = 0, $mode = 'classic' ) {
 		$type = $block['type'] ?? '';
 		if ( ! $type ) {
 			return '';
@@ -98,24 +110,28 @@ class BlockParser {
 
 		switch ( $type ) {
 			case 'paragraph':
-				return $this->parse_paragraph( $data );
+				$content = $this->parse_paragraph( $data );
+				return ( 'gutenberg' === $mode ) ? "<!-- wp:paragraph -->\n{$content}\n<!-- /wp:paragraph -->" : $content;
 			case 'heading_1':
-				return $this->parse_heading( $data, 2 ); // Shift H1 to H2
+				$content = $this->parse_heading( $data, 2 );
+				return ( 'gutenberg' === $mode ) ? "<!-- wp:heading {\"level\":2} -->\n{$content}\n<!-- /wp:heading -->" : $content;
 			case 'heading_2':
-				return $this->parse_heading( $data, 3 ); // Shift H2 to H3
+				$content = $this->parse_heading( $data, 3 );
+				return ( 'gutenberg' === $mode ) ? "<!-- wp:heading {\"level\":3} -->\n{$content}\n<!-- /wp:heading -->" : $content;
 			case 'heading_3':
-				return $this->parse_heading( $data, 4 ); // Shift H3 to H4
+				$content = $this->parse_heading( $data, 4 );
+				return ( 'gutenberg' === $mode ) ? "<!-- wp:heading {\"level\":4} -->\n{$content}\n<!-- /wp:heading -->" : $content;
 			case 'bulleted_list_item':
 			case 'numbered_list_item':
-				return $this->parse_list_item( $data, $post_id, $children );
+				return $this->parse_list_item( $data, $post_id, $children, $mode );
 			case 'image':
-				return $this->parse_image( $data, $post_id );
+				return $this->parse_image( $data, $post_id, $mode );
 			case 'code':
-				return $this->parse_code( $data );
+				return $this->parse_code( $data, $mode );
 			case 'quote':
-				return $this->parse_quote( $data );
+				return $this->parse_quote( $data, $mode );
 			case 'divider':
-				return '<hr />';
+				return ( 'gutenberg' === $mode ) ? "<!-- wp:separator -->\n<hr class=\"wp-block-separator has-alpha-channel-opacity\"/>\n<!-- /wp:separator -->" : '<hr />';
 			default:
 				return '<!-- Unsupported block type: ' . esc_html( $type ) . ' -->';
 		}
@@ -124,10 +140,16 @@ class BlockParser {
 	/**
 	 * Parse code block
 	 */
-	private function parse_code( $data ) {
+	private function parse_code( $data, $mode = 'classic' ) {
 		$content = isset( $data['rich_text'] ) ? $this->parse_rich_text( $data['rich_text'] ) : '';
 		$lang    = $data['language'] ?? '';
-		return '<pre><code class="language-' . esc_attr( $lang ) . '">' . $content . '</code></pre>';
+		$html    = '<pre><code class="language-' . esc_attr( $lang ) . '">' . $content . '</code></pre>';
+		
+		if ( 'gutenberg' === $mode ) {
+			return "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code class=\"language-" . esc_attr( $lang ) . "\">" . $content . "</code></pre>\n<!-- /wp:code -->";
+		}
+		
+		return $html;
 	}
 
 	/**
@@ -149,12 +171,12 @@ class BlockParser {
 	/**
 	 * Parse list item
 	 */
-	private function parse_list_item( $data, $post_id = 0, $children = [] ) {
+	private function parse_list_item( $data, $post_id = 0, $children = [], $mode = 'classic' ) {
 		$content = $this->parse_rich_text( $data['rich_text'] ?? [] );
 		$html    = '<li>' . $content;
 		
 		if ( ! empty( $children ) ) {
-			$html .= "\n" . $this->parse_blocks( $children, $post_id );
+			$html .= "\n" . $this->parse_blocks( $children, $post_id, $mode );
 		}
 		
 		$html .= '</li>';
@@ -164,15 +186,18 @@ class BlockParser {
 	/**
 	 * Parse quote
 	 */
-	private function parse_quote( $data ) {
+	private function parse_quote( $data, $mode = 'classic' ) {
 		$content = $this->parse_rich_text( $data['rich_text'] ?? [] );
+		if ( 'gutenberg' === $mode ) {
+			return "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><p>" . $content . "</p></blockquote>\n<!-- /wp:quote -->";
+		}
 		return '<blockquote>' . $content . '</blockquote>';
 	}
 
 	/**
 	 * Parse image
 	 */
-	private function parse_image( $data, $post_id = 0 ) {
+	private function parse_image( $data, $post_id = 0, $mode = 'classic' ) {
 		$url = '';
 		if ( 'external' === $data['type'] ) {
 			$url = $data['external']['url'] ?? '';
@@ -192,6 +217,22 @@ class BlockParser {
 		}
 
 		$caption = $this->parse_rich_text( $data['caption'] ?? [] );
+		
+		if ( 'gutenberg' === $mode ) {
+			$img_id_attr = ( ! is_wp_error( $attachment_id ) ) ? ',"id":' . $attachment_id : '';
+			$html = "<!-- wp:image {\"sizeSlug\":\"full\"" . $img_id_attr . "} -->\n";
+			$html .= '<figure class="wp-block-image size-full"><img src="' . esc_attr( $url ) . '" alt="' . esc_attr( $caption ) . '"';
+			if ( ! is_wp_error( $attachment_id ) ) {
+				$html .= ' class="wp-image-' . $attachment_id . '"';
+			}
+			$html .= '/>';
+			if ( $caption ) {
+				$html .= '<figcaption>' . $caption . '</figcaption>';
+			}
+			$html .= "</figure>\n<!-- /wp:image -->";
+			return $html;
+		}
+
 		$html = '<figure class="wp-block-image"><img src="' . esc_attr( $url ) . '" alt="' . esc_attr( $caption ) . '" />';
 		if ( $caption ) {
 			$html .= '<figcaption>' . $caption . '</figcaption>';

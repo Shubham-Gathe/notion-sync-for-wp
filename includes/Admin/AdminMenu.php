@@ -28,22 +28,32 @@ class AdminMenu {
 			__( 'Notion Sync', 'notion-sync-for-wp' ),
 			'manage_options',
 			'notion-sync-for-wp',
-			[ SettingsPage::get_instance(), 'render' ],
+			[ ConnectionsPage::get_instance(), 'render' ],
 			'dashicons-external',
 			30
 		);
 
 		add_submenu_page(
 			'notion-sync-for-wp',
-			__( 'Settings', 'notion-sync-for-wp' ),
-			__( 'Settings', 'notion-sync-for-wp' ),
+			__( 'Connections', 'notion-sync-for-wp' ),
+			__( 'Connections', 'notion-sync-for-wp' ),
 			'manage_options',
 			'notion-sync-for-wp',
-			[ SettingsPage::get_instance(), 'render' ]
+			[ ConnectionsPage::get_instance(), 'render' ]
 		);
 
 		add_submenu_page(
 			'notion-sync-for-wp',
+			__( 'Settings (Global)', 'notion-sync-for-wp' ),
+			__( 'Settings (Global)', 'notion-sync-for-wp' ),
+			'manage_options',
+			'notion-sync-for-wp-settings',
+			[ SettingsPage::get_instance(), 'render' ]
+		);
+
+		// Register Mapping Page but hide from sidebar (accessible via Edit/Add buttons)
+		add_submenu_page(
+			null,
 			__( 'Field Mapping', 'notion-sync-for-wp' ),
 			__( 'Field Mapping', 'notion-sync-for-wp' ),
 			'manage_options',

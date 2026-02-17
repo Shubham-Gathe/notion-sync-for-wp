@@ -32,17 +32,24 @@ class SyncService {
 	 * @param int $limit Max items to sync in this batch
 	 * @return array|WP_Error Results summary and pagination info
 	 */
-	public function sync_database( $cursor = null, $limit = 10 ) {
-		$client = \NotionSync\Notion\NotionClient::get_instance();
-		$db_id  = get_option( 'notion_sync_db_id' );
+	public function sync_database( $connection_id, $cursor = null, $limit = 10 ) {
+		$repository = \NotionSync\Sync\ConnectionRepository::get_instance();
+		$connection = $repository->get( $connection_id );
 		
-		if ( ! $db_id ) {
-			return new \WP_Error( 'missing_db_id', __( 'Database ID is missing. Please check your settings.', 'notion-sync-for-wp' ) );
+		if ( ! $connection ) {
+			return new \WP_Error( 'invalid_connection', __( 'Connection not found.', 'notion-sync-for-wp' ) );
 		}
 
-		$mapping = \NotionSync\Sync\FieldMapper::get_instance()->get_mapping();
+		$client = \NotionSync\Notion\NotionClient::get_instance();
+		$db_id  = $connection['database_id'];
+		
+		if ( ! $db_id ) {
+			return new \WP_Error( 'missing_db_id', __( 'Database ID is missing for this connection.', 'notion-sync-for-wp' ) );
+		}
+
+		$mapping = isset( $connection['mapping'] ) ? $connection['mapping'] : [];
 		if ( empty( $mapping['post_title'] ) ) {
-			return new \WP_Error( 'missing_mapping', __( 'Field mapping is not configured. Please map at least the "Post Title" in the Field Mapping page.', 'notion-sync-for-wp' ) );
+			return new \WP_Error( 'missing_mapping', __( 'Field mapping is not configured for this connection.', 'notion-sync-for-wp' ) );
 		}
 
 		// Construct filter for Status = "Ready"
@@ -74,18 +81,18 @@ class SyncService {
 
 		foreach ( $pages_to_sync as $page ) {
 			try {
-				$sync_result = $this->sync_page( $page['id'] );
+				$sync_result = $this->sync_page( $page['id'], $connection );
 				
 				if ( is_wp_error( $sync_result ) ) {
 					$results['errors']++;
-					$results['details'][] = "Error syncing page {$page['id']}: " . $sync_result->get_error_message();
+					$results['details'][] = sprintf( "[%s] Error syncing page %s: %s", $connection['name'], $page['id'], $sync_result->get_error_message() );
 				} else {
 					$results['success']++;
-					$results['details'][] = "Successfully synced page {$page['id']} -> Post {$sync_result}";
+					$results['details'][] = sprintf( "[%s] Successfully synced page %s -> Post %d", $connection['name'], $page['id'], $sync_result );
 				}
 			} catch ( \Exception $e ) {
 				$results['errors']++;
-				$results['details'][] = "Critical failure syncing page {$page['id']}: " . $e->getMessage();
+				$results['details'][] = sprintf( "[%s] Critical failure syncing page %s: %s", $connection['name'], $page['id'], $e->getMessage() );
 			}
 		}
 
@@ -98,11 +105,11 @@ class SyncService {
 	 * @param string $page_id
 	 * @return int|WP_Error Post ID on success
 	 */
-	public function sync_page( $page_id ) {
+	public function sync_page( $page_id, $connection ) {
 		$client     = \NotionSync\Notion\NotionClient::get_instance();
 		$parser     = \NotionSync\Notion\BlockParser::get_instance();
-		$mapper     = \NotionSync\Sync\FieldMapper::get_instance();
-		$mapping    = $mapper->get_mapping();
+		$mapping    = isset( $connection['mapping'] ) ? $connection['mapping'] : [];
+		$output_mode = isset( $connection['output_mode'] ) ? $connection['output_mode'] : 'classic';
 
 		// 1. Fetch Page Metadata (Properties)
 		$page = $client->get_page( $page_id );
@@ -122,15 +129,20 @@ class SyncService {
 		$post_id = ! empty( $existing_posts ) ? $existing_posts[0] : 0;
 
 		// 2. Extract Data based on Mapping
+		$post_type = ! empty( $mapping['post_type'] ) ? $mapping['post_type'] : 'post';
+		if ( ! post_type_exists( $post_type ) ) {
+			return new \WP_Error( 'invalid_post_type', sprintf( __( 'Post type "%s" does not exist.', 'notion-sync-for-wp' ), $post_type ) );
+		}
+
 		$post_data = [
-			'post_type' => 'post',
+			'post_type' => $post_type,
 		];
 		if ( $post_id ) {
 			$post_data['ID'] = $post_id;
 		}
 
 		foreach ( $mapping as $wp_field => $notion_prop_id ) {
-			if ( ! $notion_prop_id || 'custom_meta' === $wp_field ) {
+			if ( ! $notion_prop_id || in_array( $wp_field, [ 'custom_meta', 'taxonomies' ], true ) ) {
 				continue;
 			}
 
@@ -165,7 +177,7 @@ class SyncService {
 			if ( '-1' === $notion_prop_id && 'post_content' === $wp_field ) {
 				$blocks = $client->get_block_children( $page_id );
 				if ( ! is_wp_error( $blocks ) ) {
-					$post_data['post_content'] = $parser->parse_blocks( $blocks['results'] ?? [], $post_id );
+					$post_data['post_content'] = $parser->parse_blocks( $blocks['results'] ?? [], $post_id, $output_mode );
 				}
 			}
 		}
@@ -202,16 +214,29 @@ class SyncService {
 			return $post_id;
 		}
 
-		// 4. Handle Taxonomies (Categories and Tags)
-		if ( ! is_wp_error( $post_id ) ) {
-			if ( ! empty( $post_data['category'] ) ) {
-				$categories = is_array( $post_data['category'] ) ? $post_data['category'] : [ $post_data['category'] ];
-				$cat_ids = $this->ensure_terms( $categories, 'category' );
-				wp_set_post_categories( $post_id, $cat_ids );
-			}
-			if ( ! empty( $post_data['post_tag'] ) ) {
-				$tags = is_array( $post_data['post_tag'] ) ? $post_data['post_tag'] : [ $post_data['post_tag'] ];
-				wp_set_post_terms( $post_id, $tags, 'post_tag' );
+		// 4. Handle Taxonomies Dynamically
+		if ( ! is_wp_error( $post_id ) && ! empty( $mapping['taxonomies'] ) ) {
+			foreach ( $mapping['taxonomies'] as $tax_slug => $notion_prop_id ) {
+				if ( ! $notion_prop_id ) continue;
+				if ( ! taxonomy_exists( $tax_slug ) ) continue;
+
+				$term_names = [];
+				foreach ( $page['properties'] as $prop ) {
+					if ( $prop['id'] === $notion_prop_id ) {
+						$val = $this->extract_property_value( $prop );
+						if ( is_array( $val ) ) {
+							$term_names = $val;
+						} elseif ( ! empty( $val ) ) {
+							$term_names = [ $val ];
+						}
+						break;
+					}
+				}
+
+				if ( ! empty( $term_names ) ) {
+					$term_ids = $this->ensure_terms( $term_names, $tax_slug );
+					wp_set_object_terms( $post_id, $term_ids, $tax_slug );
+				}
 			}
 		}
 
@@ -232,10 +257,12 @@ class SyncService {
 		if ( ! empty( $mapping['custom_meta'] ) ) {
 			foreach ( $mapping['custom_meta'] as $meta_mapping ) {
 				if ( empty( $meta_mapping['key'] ) || empty( $meta_mapping['property'] ) ) continue;
+				$meta_key = sanitize_key( $meta_mapping['key'] );
+				if ( ! $meta_key ) continue;
 				
 				foreach ( $page['properties'] as $prop ) {
 					if ( $prop['id'] === $meta_mapping['property'] ) {
-						update_post_meta( $post_id, $meta_mapping['key'], $this->extract_property_value( $prop ) );
+						update_post_meta( $post_id, $meta_key, $this->extract_property_value( $prop ) );
 					}
 				}
 			}

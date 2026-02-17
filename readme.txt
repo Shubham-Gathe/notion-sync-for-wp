@@ -1,5 +1,5 @@
 === Notion Sync for WP ===
-Contributors: antigravity
+Contributors: Shubham Gate
 Tags: notion, sync, database, block editor, auto-publish
 Requires at least: 5.8
 Tested up to: 6.9

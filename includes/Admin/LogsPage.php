@@ -21,7 +21,11 @@ class LogsPage {
 	private function __construct() {}
 
 	public function render() {
-		$template = NOTION_SYNC_PATH . 'templates/admin/logs-page.php';
+		$template    = NOTION_SYNC_PATH . 'templates/admin/logs-page.php';
+		$repository  = \NotionSync\Sync\ConnectionRepository::get_instance();
+		$connections = $repository->get_all();
+		$active_conn = isset( $_GET['sync_conn'] ) ? sanitize_text_field( $_GET['sync_conn'] ) : '';
+
 		if ( file_exists( $template ) ) {
 			include $template;
 		} else {
