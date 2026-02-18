@@ -51,9 +51,9 @@ class AdminMenu {
 			[ SettingsPage::get_instance(), 'render' ]
 		);
 
-		// Register Mapping Page but hide from sidebar (accessible via Edit/Add buttons)
+		// Register Mapping Page as a hidden page (null parent)
 		add_submenu_page(
-			null,
+			null, // No parent means it's hidden from menus but still accessible
 			__( 'Field Mapping', 'notion-sync-for-wp' ),
 			__( 'Field Mapping', 'notion-sync-for-wp' ),
 			'manage_options',

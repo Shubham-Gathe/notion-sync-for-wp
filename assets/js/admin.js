@@ -158,5 +158,25 @@
                 }
             });
         });
+        // Mapping Page: Handle dynamic Custom Meta rows
+        $(document).on('click', '#add-meta-mapping', function (e) {
+            e.preventDefault();
+            var $tbody = $('#notion-sync-for-wp-meta-mapping tbody');
+            var template = $('#tmpl-notion-sync-meta-row').html();
+
+            // Use a unique index based on timestamp to avoid collisions
+            var index = Date.now();
+            var rowHtml = template.replace(/{{INDEX}}/g, index);
+
+            $tbody.append(rowHtml);
+        });
+
+
+        $(document).on('click', '.remove-meta-row', function (e) {
+            e.preventDefault();
+            if (confirm('Are you sure you want to remove this field mapping?')) {
+                $(this).closest('tr').remove();
+            }
+        });
     });
 })(jQuery);

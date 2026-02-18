@@ -216,29 +216,42 @@ class SyncService {
 
 		// 4. Handle Taxonomies Dynamically
 		if ( ! is_wp_error( $post_id ) && ! empty( $mapping['taxonomies'] ) ) {
+			\NotionSync\Core\Logger::get_instance()->log( "Taxonomy Mapping found: " . json_encode( $mapping['taxonomies'] ), 'debug' );
 			foreach ( $mapping['taxonomies'] as $tax_slug => $notion_prop_id ) {
 				if ( ! $notion_prop_id ) continue;
-				if ( ! taxonomy_exists( $tax_slug ) ) continue;
+				if ( ! taxonomy_exists( $tax_slug ) ) {
+					\NotionSync\Core\Logger::get_instance()->log( "Taxonomy '{$tax_slug}' does not exist", 'debug' );
+					continue;
+				}
 
 				$term_names = [];
-				foreach ( $page['properties'] as $prop ) {
-					if ( $prop['id'] === $notion_prop_id ) {
+				$found = false;
+				foreach ( $page['properties'] as $prop_name => $prop ) {
+					if ( ( isset( $prop['id'] ) && $prop['id'] === $notion_prop_id ) || $prop_name === $notion_prop_id ) {
 						$val = $this->extract_property_value( $prop );
 						if ( is_array( $val ) ) {
 							$term_names = $val;
 						} elseif ( ! empty( $val ) ) {
 							$term_names = [ $val ];
 						}
+						\NotionSync\Core\Logger::get_instance()->log( "Found terms for taxonomy '{$tax_slug}' in property '{$prop_name}': " . json_encode( $term_names ), 'debug' );
+						$found = true;
 						break;
 					}
 				}
 
+				if ( ! $found ) {
+					\NotionSync\Core\Logger::get_instance()->log( "Could not find Notion property matching '{$notion_prop_id}' for taxonomy '{$tax_slug}'", 'debug' );
+				}
+
 				if ( ! empty( $term_names ) ) {
 					$term_ids = $this->ensure_terms( $term_names, $tax_slug );
+					\NotionSync\Core\Logger::get_instance()->log( "Setting terms for taxonomy '{$tax_slug}': " . json_encode( $term_ids ), 'debug' );
 					wp_set_object_terms( $post_id, $term_ids, $tax_slug );
 				}
 			}
 		}
+
 
 		// 5. Handle Featured Image
 		if ( ! is_wp_error( $post_id ) && ! empty( $post_data['_thumbnail_id'] ) ) {
@@ -255,18 +268,36 @@ class SyncService {
 
 		// 6. Handle Custom Meta
 		if ( ! empty( $mapping['custom_meta'] ) ) {
+			\NotionSync\Core\Logger::get_instance()->log( "Custom Meta Mapping found: " . json_encode( $mapping['custom_meta'] ), 'debug' );
 			foreach ( $mapping['custom_meta'] as $meta_mapping ) {
-				if ( empty( $meta_mapping['key'] ) || empty( $meta_mapping['property'] ) ) continue;
+				if ( empty( $meta_mapping['key'] ) || empty( $meta_mapping['property'] ) ) {
+					\NotionSync\Core\Logger::get_instance()->log( "Skipping empty meta mapping: " . json_encode( $meta_mapping ), 'debug' );
+					continue;
+				}
 				$meta_key = sanitize_key( $meta_mapping['key'] );
-				if ( ! $meta_key ) continue;
+				if ( ! $meta_key ) {
+					\NotionSync\Core\Logger::get_instance()->log( "Invalid meta key after sanitization: " . $meta_mapping['key'], 'debug' );
+					continue;
+				}
 				
-				foreach ( $page['properties'] as $prop ) {
-					if ( $prop['id'] === $meta_mapping['property'] ) {
-						update_post_meta( $post_id, $meta_key, $this->extract_property_value( $prop ) );
+				$found = false;
+				foreach ( $page['properties'] as $prop_name => $prop ) {
+					if ( ( isset( $prop['id'] ) && $prop['id'] === $meta_mapping['property'] ) || $prop_name === $meta_mapping['property'] ) {
+						$val = $this->extract_property_value( $prop );
+						\NotionSync\Core\Logger::get_instance()->log( "Updating meta '{$meta_key}' with value from property '{$prop_name}' (ID: {$prop['id']}): " . json_encode( $val ), 'debug' );
+						update_post_meta( $post_id, $meta_key, $val );
+						$found = true;
+						break;
 					}
 				}
+				if ( ! $found ) {
+					\NotionSync\Core\Logger::get_instance()->log( "Could not find Notion property matching '{$meta_mapping['property']}' for meta key '{$meta_key}'", 'debug' );
+				}
 			}
+		} else {
+			\NotionSync\Core\Logger::get_instance()->log( "No Custom Meta Mapping found in mapping: " . json_encode( $mapping ), 'debug' );
 		}
+
 
 		\NotionSync\Core\Logger::get_instance()->log( "Sync Successful for Page {$page_id} -> Post {$post_id}", 'info' );
 		return $post_id;
